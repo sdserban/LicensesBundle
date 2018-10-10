@@ -6,4 +6,7 @@
  * and open the template in the editor.
  */
 
-echo $this->titi;
+echo "$this->msg<br />";
+
+echo "Initial licenseId: $this->initial_licenseId<br />";
+echo "Initial licenseData: $this->initial_licenseData<br />";
