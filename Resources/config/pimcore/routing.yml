@@ -1,0 +1,5 @@
+licenses:
+    resource: "@LicensesBundle/Controller/"
+    type:     annotation
+    prefix:   /
+
