@@ -26,16 +26,12 @@ class DefaultController extends FrontendController
     {
         $licenseStatus = 'no license';
         $lic = new Lmass();
-        $lic->setLicenseId('abac0f33fc21');
+
+        $this->view->valid = "valid: " . ($lic->isValid() ? "yes" : "no");
         
-        $this->view->msg = "status: " 
-                . (is_null($lic->getStatus()) ? "null" : ($lic->getStatus() ? "true" : "false")) 
-                . "<br />status message: " 
-                . (is_null($lic->getStatusMessage()) ? "null" : $lic->getStatusMessage());
-        
-        $this->view->initial_licenseId = json_encode($lic->getLicenseId());
-        $this->view->initial_licenseData = json_encode($lic->getLicenseData());
-//        return $this->json(["data" => "value"]);
+        $this->view->msg = "<br />status message: " . (is_null($lic->getStatusMessage()) ? "null" : $lic->getStatusMessage())
+                . "<br />licenseData: " . (is_null($lic->getLicenseData()) ? "null" : json_encode($lic->getLicenseData()))
+                ;
     }
     
 }

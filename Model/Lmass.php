@@ -34,11 +34,8 @@ class Lmass {
     private $moduleId;
     private $licenseId; // fill with 0 if demand a demo license, real licenseId returned into licenseData
     private $licenseData;
-    private $status;
-
+    private $statusMessage;
     
-    private $error;
-
     /*
      * structure for $licenseData
      * 
@@ -66,47 +63,12 @@ class Lmass {
         $this->moduleId = MODULE_ID;
         $this->licenseId = null;
         $this->licenseData = null;
-        $this->status = null;
         $this->statusMessage = null;
         
-        if(file_exists($this->licenseFile)) {
-            if(!is_writable($this->licenseFile)) {
-                die('Error: License file is not writable!');
+        if($this->isSetted()) {
+            if(!$this->loadLicenseData()) {
+                $this->loadLicenseRemoteData();
             }
-            $tmpObj=json_decode(file_get_contents($this->licenseFile));
-            if(!is_null($tmpObj) && property_exists($tmpObj, 'licenseId')) {
-                if(!is_null($tmpObj) && (strlen($tmpObj->licenseId) == LICENSE_LEN)) {
-                    $this->licenseId = $tmpObj->licenseId;
-                } else {
-                    die("Error: Wrong data in license file!");
-                }
-            } else {
-                die("Error: Wrong data in license file!");
-            }
-            if(file_exists($this->localDataFile)) {
-                if(!is_writable($this->localDataFile)) {
-                    die('Error: License file is not writable!');
-                }
-                $tmpObj=json_decode(file_get_contents($this->localDataFile));
-                if(!is_null($tmpObj) && property_exists($tmpObj, $this->licenseId)) {
-                    $tmpStr = $this->licenseId;
-                    $this->licenseData = json_decode($this->encrypt_decrypt('decrypt', $tmpObj->$tmpStr));
-                }
-                if(!is_null($this->licenseData) && property_exists($this->licenseData, 'licenseId')) {
-                    if($this->licenseData->licenseId != $this->licenseId) {
-                        die("Error: Wrong data in license file!");
-                    } else {
-                        // check all licenses properties if not all get remote data
-                        //if / valid ok
-                        //else if expired or invalid  get remote data
-                    }
-                } else {
-                    // get remote data
-                }
-            }
-        } else {
-            $this->status = false;
-            $this->statusMessage = 'no license yet';
         }
     }
     
@@ -121,21 +83,64 @@ class Lmass {
                 file_put_contents($this->licenseFile, json_encode(array('licenseId' => $this->licenseId))) or die("Error: Can't save license in license file!");
             }
         }
+        return true;
     }
     
     public function getLicenseData() {
         return $this->licenseData;
     }
 
-    public function getStatus() {
-        return $this->status;
-    }
-
     public function getStatusMessage() {
         return $this->statusMessage;
     }
     
-    private function isSetted() {
+    public function isValid() {
+        if($this->isSetted()) {
+            if(!is_null($this->licenseData)) {
+                if(property_exists($this->licenseData, 'licenseId') &&
+                   property_exists($this->licenseData, 'clientId') &&
+                   property_exists($this->licenseData, 'clientName') &&
+                   property_exists($this->licenseData, 'installationId') &&
+                   property_exists($this->licenseData, 'validToDate') &&
+                   property_exists($this->licenseData, 'modules') &&
+                   is_array($this->licenseData->modules)) {
+                    if($this->licenseId != $this->licenseData->licenseId) {
+                        $this->statusMessage = "licenseId doesn't match";
+                        return false;
+                    }
+                    $demo = ($this->licenseData->clientId == 1); // demo license
+                    if($this->getInstalationId($demo) != $this->licenseData->installationId) {
+                        $this->statusMessage = "installation key doesn't match";
+                        return false;
+                    }
+                    if(time() > $this->licenseData->validToDate) {
+                        $this->statusMessage = "license is expired";
+                        return false;
+                    }
+                    $tmpArray = array();
+                    foreach($this->licenseData->modules as $module) {
+                        if(property_exists($module, 'moduleId')) {
+                            array_push($tmpArray, $module->moduleId);
+                        }
+                    }
+                    if(!in_array($this->moduleId, $tmpArray)) {
+                        $this->statusMessage = "this module isn't part of the license";
+                        return false;
+                    }
+                    $this->statusMessage = "license is valid";
+                    return true;
+                }
+            } else {
+                $this->statusMessage = "license data missing";
+                return false;
+            }
+        } else {
+            $this->statusMessage = "license isn't setted yet";
+            return false;
+        }
+    }
+    
+    public function isSetted() {
         if(file_exists($this->licenseFile)) {
             if(!is_writable($this->licenseFile)) {
                 die('Error: License file is not writable!');
@@ -150,27 +155,26 @@ class Lmass {
             } else {
                 die("Error: Wrong data in license file!");
             }
+            $this->statusMessage = "license is setted";
             return true;
         } else {
+            $this->statusMessage = "license file doesn't exist";
             return false;
         }
     }
     
-    private function loadLicenseData() {
-        return true;
+    private function getInstalationId($demo = false) {
+        $str = php_uname(); // unique for server
+        if(is_bool($demo) && $demo) {
+            $str .= $_SERVER['DOCUMENT_ROOT']; // unique for installation, not used for demo license which is license per server
+        }
+        $installationId = md5($str);
+        return $installationId;
     }
     
-    private function loadLicenseRemoteData() {
-        return true;
-    }
-    
-    private function saveLicenseData() {
-        
-    }
-    
-    public function encrypt_decrypt($action, $string) {
+    private function encrypt_decrypt($action, $string) {
         //BEGIN DEBUG
-        return $string;
+//        return $string;
         //END DEBUG
         $output = false;
         $encrypt_method = "AES-256-CBC";
@@ -190,403 +194,85 @@ class Lmass {
         return $output;
     }
     
-    
-    private function getInstalationId() {
-        $installationId = md5(php_uname() . $_SERVER['DOCUMENT_ROOT']);
-        return $installationId;
-    }
-    
-    /**
-     * method to setup base URL for API call
-     * 
-     * @param string $url: valid URL
-     *
-     * @return true/false if succeed/failed to setup base URL
-     *  in case of fail an error message is set
-     *  error details are available with method getError()
-     */
-    public function setBaseURL ($url) {
-        if (filter_var($url, FILTER_VALIDATE_URL)) {
-            $this->baseURL = $url;
-            $this->clearError();
-            return true;
-        } else {
-            $this->setError(1011, "No valid URL provided for setBaseURL()");
-            return false;
-        }
-    }
-    
-    private function getURL() {
-        if(is_null($this->baseURL)) {
-            $this->setError(1031, "Base URL is not set");
-            return false;
-        }
-        if(is_null($this->licenseId)) {
-            $this->setError(1032, "Licence id is not set");
-            return false;
-        }
-        $this->clearError();
-        $key = $this->licenseId . $this->getInstalationId();
-        return $key;
-    }
-    
-    /**
-     * method to register filename which store license data and create file if needed
-     * 
-     * @param string $fileName: file name
-     *
-     * @return true/false if file exist and has write rigths or if file does not exist but was succesfully created
-     *  in case of fail an error message is set
-     *  error details are available with method getError()
-     */
-    public function setFile($fileName) {
-        if(file_exists($fileName)) {
-            if(is_writeable($fileName)) {
-                $this->localDataFile = $fileName;
-                $this->clearError();
-                return true;
+    private function loadLicenseData() {
+        if(file_exists($this->localDataFile)) {
+            if(!is_writable($this->localDataFile)) {
+                $this->statusMessage = "Error: License file is not writable!";
+                return false;
+            }
+            $tmpObj=json_decode(file_get_contents($this->localDataFile));
+            if(!is_null($tmpObj) && property_exists($tmpObj, $this->licenseId)) {
+                $tmpStr = $this->licenseId;
+                $this->licenseData = json_decode($this->encrypt_decrypt('decrypt', $tmpObj->$tmpStr));
+            }
+            if(!is_null($this->licenseData) && property_exists($this->licenseData, 'licenseId')) {
+                if($this->licenseData->licenseId != $this->licenseId) {
+                    $this->statusMessage = "Error: Wrong data in license file!";
+                    return false;
+                }
             } else {
-                $this->setError(1041, "License file is not writable");
+                $this->statusMessage = "Error: Wrong data in license file!";
                 return false;
             }
-        } else {
-            $fp = fopen($fileName, "w");
-            if (!$fp) {
-                $this->setError(1042, "Error to create license file");
-                return false;
-            }
-            fclose($fp);
-            $this->localDataFile = $fileName;
-            $this->clearError();
+            $this->statusMessage = "local license data are loaded";
             return true;
-        }
-    }
-    
-    private function setError($id, $msg) {
-        $this->error = "Error LM" . $id . ": " . $msg;
-    }
-    
-    private function clearError() {
-        $this->error = null;
-    }
-    
-    /**
-     * method to read error message for the last called method
-     * 
-     * @param no parameters
-     *
-     * @return string
-     */
-    public function getError() {
-        return (is_null($this->error) ? "" : $this->error);
-    }
-    
-    private function clearData() {
-        $this->licenseData = null;
-    }
-    
-    /**
-     * method to record first time or to reset license in license file
-     * 
-     * @param string $license: license ID
-     *
-     * @return true/false if license initialization succeed or not
-     *  in case of fail an error message is set
-     *  error details are available with method getError()
-     */
-    public function resetLicense($license) {
-        if(strcmp($license, $this->askForDemoToken()) == 0) {
-            $this->setError(1051, "Token to ask for demo license can't be initialized");
-            return false;
-        }
-        if(is_null($this->localDataFile)) {
-            $this->setError(1052, "License file is not declared");
-            return false;
-        }
-        $fp = fopen($this->localDataFile, "r");
-        if(!fp) {
-            $this->setError(1053, "License file can't be read");
-            return false;
-        }
-        $lines = array();
-        while (!feof($fp)) {
-            $line = rtrim(fgets($fp));
-            if(strlen($line) >= LICENSE_LEN) {
-                $licenseId = substr($line, 0, LICENSE_LEN);
-                if(strcmp($license, $licenseId) != 0) {
-                    array_push($lines, $line);
-                }
-            }
-        }
-        fclose($fp);
-        array_push($lines, $license);
-        $fp = fopen($this->localDataFile, "w");
-        if(!fp) {
-            $this->setError(1054, "License file can't be written");
-            return false;
-        }
-        foreach($lines as $line) {
-            fwrite($fp, $line . PHP_EOL);
-        }
-        fclose($fp);
-        return true;
-    }
-    
-     public function storeLicense() {
-        if(strcmp($license, $this->askForDemoToken()) == 0) {
-            $this->setError(1121, "Can't store unprocessed demo license request.");
-            return false;
-        }
-        if(is_null($this->localDataFile)) {
-            $this->setError(1122, "License file is not declared");
-            return false;
-        }
-        $fp = fopen($this->localDataFile, "r");
-        if(!fp) {
-            $this->setError(1123, "License file can't be read");
-            return false;
-        }
-        if(is_null($this->licenseData)) {
-            $this->setError(1125, "No license data in memory to be saved");
-            return false;
-        }
-        $lines = array();
-        while (!feof($fp)) {
-            $line = rtrim(fgets($fp));
-            if(strlen($line) >= LICENSE_LEN) {
-                $licenseId = substr($line, 0, LICENSE_LEN);
-                if(strcmp($license, $licenseId) != 0) {
-                    array_push($lines, $line);
-                }
-            }
-        }
-        fclose($fp);
-        $line = $this->licenseData['licenseId'] . $this->encrypt_decrypt('encrypt', json_encode($this->licenseData));
-        array_push($lines, $line);
-        $fp = fopen($this->localDataFile, "w");
-        if(!fp) {
-            $this->setError(1054, "License file can't be written");
-            return false;
-        }
-        foreach($lines as $line) {
-            fwrite($fp, $line . PHP_EOL);
-        }
-        fclose($fp);
-        return true;
-    }
-    
-    public function askForDemoToken() {
-        $s = "";
-        $s = str_pad($s, LICENSE_LEN, "0");
-        return $s;
-    }
-    
-    /**
-     * method to check if a license for a module is valid now
-     * 
-     * @param int $module: module ID
-     *
-     * @return true/false if license is valid or not
-     *  in case of fail, license not found or license invalid an error message is set
-     *  error details are available with method getError()
-     */
-    public function checkLicense($licenseId, $moduleId) {
-        $valid = false;
-        if(is_null($moduleId) || is_null($licenseId)) {
-            $this->setError(1061, "Invalid parameter in isValid()");
-            return false;
-        }
-        $this->licenseId = $licenseId;
-        $this->moduleId = $moduleId;
-        if(strcmp($licenseId, $this->askForDemoToken()) != 0) {
-            $this->loadLocalData();
-            if(!$this->validToday()) {
-                $this->loadRemoteData();
-            }
         } else {
-            $this->loadRemoteData();
+            $this->statusMessage = "local license data file doesn't exist yet";
+            return false;
         }
-        
-        return $this->isValid();
     }
     
-    /*
-     * structure for $licenseData
-     * 
-     * string licenseId  : if ask for demo this will be only real licenseId
-     * array data
-     *      [
-     *          int clientId  : 0 = Demo
-     *          string clientName
-     *          string installationId
-     *          timestamp validToDate
-     *          array modules
-     *              [
-     *                  array(int moduleId, string mudleName
-     *                  ...
-     *              ]
-     *      ]
-     * 
-     * 
-     */
-    private function isValid() {
-        if(is_null($this->licenseData)) {
-            $this->setError(1071, "No license data loaded");
-            return false;
-        }
-        if(is_null($this->licenseId)) {
-            $this->setError(1072, "No license ID declared");
-            return false;
-        }
-        if(is_null($this->moduleId)) {
-            $this->setError(1073, "No module ID declared");
-            return false;
-        }
-        if($this->validToday()) {
-            if(array_key_exists('modules', $this->licenseData['data'])) {
-                $modules = array();
-                foreach($this->licenseData['data']['modules'] as $moduleData) {
-                    array_push($modules, $moduleData['moduleId']);
+    private function loadLicenseRemoteData() {
+        if($this->isSetted()) {
+            $this->statusMessage = "remote license data will be loaded";
+            $lic = $this->licenseId;
+            $key = $this->getInstalationId();
+            $mod = $this->moduleId;
+            $url = $this->baseURL . "?lic=$lic" . "&key=$key";
+            $reponse = file_get_contents($url);
+            $tmpObj = json_decode($reponse);
+            if(!is_null($tmpObj) && 
+                    property_exists($tmpObj, 'status') && 
+                    property_exists($tmpObj, 'status_message') && 
+                    property_exists($tmpObj, 'data')) {
+                $this->statusMessage = $tmpObj->status_message;
+                if(isset($tmpObj->data) && property_exists($tmpObj->data, 'demo') && $tmpObj->data->demo) {
+                    $key = $this->getInstalationId(true);
+                    $url = $this->baseURL . "?&mod=$mod" . "&key=$key";
+                    $this->statusMessage = "remote license data will be loaded for demo license";
+                    $tmpObj = json_decode(file_get_contents($url));
                 }
-                if(in_array($this->moduleId, $modules)) {
-                    $this->error = "Valid license";
-                    return true;
-                } else {
-                    $this->setError(1074, "Module is not licensed");
-                    return false;
-                }
-            }
-        }
-        $this->setError(1075, "Wrong structure of license data");
-        return false;
-    }
-    
-    private function validToday() {
-        if(is_null($this->licenseData)) {
-            $this->setError(1081, "No license data loaded");
-            return false;
-        }
-        if(array_key_exists('data', $this->licenseData)) {
-            if(array_key_exists('validToDate', $this->licenseData['data'])) {
-                if(time() > $this->licenseData['data']['validToDate']) {
-                    $this->setError(1082, "License expired");
-                    return false;
-                } else {
-                    $this->clearError();
+                if(isset($tmpObj->data) && property_exists($tmpObj->data, 'licenseId')) {
+                    $this->licenseID = $tmpObj->data->licenseId;
+                    $this->licenseData = $tmpObj->data;
+                    $this->saveLicenseData();
+                    $this->statusMessage = "license data loaded remote and saved local";
                     return true;
                 }
-            }
-        }
-        $this->clearData();
-        $this->setError(1083, "Wrong structure of license data");
-        return false;
-    }
-    
-    private function loadLocalData() {
-        $this->clearData();
-        if(is_null($this->localDataFile)) {
-            $this->setError(1091, "License file is not declared");
-            return false;
-        }
-        if(is_null($this->licenseId)) {
-            $this->setError(1092, "No license ID declared");
-            return false;
-        }
-        if(strcmp($this->licenseId, $this->askForDemoToken()) == 0) {
-            $this->setError(1093, "This is only a token to demand a demo license");
-            return false;
-        }
-        $fp = fopen($this->localDataFile, "r");
-        if(!fp) {
-            $this->setError(1094, "License file can't be read");
-            return false;
-        }
-        while (!feof($fp)) {
-            $line = trim(fgets($fp));
-            if(strlen($line) >= LICENSE_LEN) {
-                $licenseId = substr($line, 0, LICENSE_LEN);
-                if(strcmp($this->licenseId, $licenseId) == 0) {
-                    $data = substr($line, LICENSE_LEN);
-                    if(strlen($data) == 0) {
-                        $this->getError(1095, "License initialized, no local license data");
-                        return false;
-                    }
-                    $data = $this->encrypt_decrypt('decrypt', $data);
-                    $this->licenseData = json_decode($data, true);
-                    if(!is_array($this->licenseData)) {
-                        $line = $this->licenseId;
-                    }
-                    $this->clearError();
-                    fclose($fp);
-                    return true;
-                }
-            }
-        }
-        fclose($fp);
-        $this->setError(1099, "No local record for that license");
-        return false;
-    }
-    
-    private function loadRemoteData() {
-        $this->clearData();
-        if(is_null($this->baseURL)) {
-            $this->setError(1101, "No URL declared for API call");
-            return false;
-        }
-        if(is_null($this->licenseId)) {
-            $this->setError(1101, "No license ID declared");
-            return false;
-        }
-        $licenseId = strtolower($this->licenseId);
-        $str = php_uname();
-        $suffix = "";
-        $licenseId = strtolower($this->licenseId);
-        if(strcmp($this->licenseId, $this->askForDemoToken()) == 0) {
-            if(is_null($this->moduleId)) {
-                $this->setError(1102, "No module ID declared");
+            } else {
+                $this->statusMessage = "invalid remote answer";
                 return false;
             }
-            $moduleId = strtolower($this->moduleId);
-            $suffix .= '&module=' . $moduleId;
+        }
+        $this->statusMessage = "license isn't setted yet";
+        return false;
+    }
+    
+    private function saveLicenseData() {
+        if(is_null($this->licenseData)) {
+            return false;
+        }
+        if(file_exists($this->localDataFile)) {
+            if(!is_writable($this->localDataFile)) {
+                die('Error: License file is not writable!');
+            }
+            $tmpObj=json_decode(file_get_contents($this->localDataFile));
         } else {
-            $str .= $_SERVER['DOCUMENT_ROOT'];
+            $tmpObj = new Object();
         }
-        $installationId = md5($str);
-        $key = strtolower($licenseId . $installationId . $suffix);
-        $url = $this->baseURL . "?key=" . $key;
-        $response = file_get_contents($url);
-        $result = json_decode($response, true);
-        if(!(isset($result['status']) && isset($result['status_message']) && isset($result['data']))) {
-            $this->setError(1103, "Invalid structure received from remote license server");
-            return false;
-        }
-        if(is_null($result['data'])) {
-            $this->setError(1104, "Remote message: " . $result['status'] . " " . $result['status_message']);
-            return false;
-        }
-        $this->licenseData = $result['data'];
-        $this->storeLicense();
-         
+        $tmpStr = $this->licenseId;
+        $tmpObj->$tmpStr = json_encode($this->encrypt_decrypt('encrypt', json_encode($this->licenseData)));
+        file_put_contents($this->localDataFile, json_encode($tmpObj)) or die("Error: Can't save license in license file!");
         return true;
-    }
-    
-    
-    
-    public function getMessage() {
-        return $this->message;
-    }
-    
-    /**
-     * method to encrypt or decrypt a plain text string
-     * initialization vector(IV) has to be the same when encrypting and decrypting
-     * 
-     * @param string $action: can be 'encrypt' or 'decrypt'
-     * @param string $string: string to encrypt or decrypt
-     *
-     * @return string
-     */
-    
-    public function testIt() {
-        return "It's ok!";
     }
 }
