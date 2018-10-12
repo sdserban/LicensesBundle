@@ -36,26 +36,6 @@ class Lmass {
     private $licenseData;
     private $statusMessage;
     
-    /*
-     * structure for $licenseData
-     * 
-     * string licenseId  : if ask for demo this will be only real licenseId
-     * array data
-     *      [
-     *          int clientId  : 0 = Demo
-     *          string clientName
-     *          string installationId
-     *          timestamp validToDate
-     *          array modules
-     *              [
-     *                  array(int moduleId, string mudleName
-     *                  ...
-     *              ]
-     *      ]
-     * 
-     * 
-     */
-    
     public function __construct() {
         $this->licenseFile = LICENSE_FILE;
         $this->localDataFile = LOCAL_DATA_FILE;
