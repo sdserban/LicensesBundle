@@ -69,6 +69,7 @@ class Lmass {
             if(!$this->loadLicenseData()) {
                 $this->loadLicenseRemoteData();
             }
+            $this->saveLicenseData();
         }
     }
     
@@ -79,10 +80,22 @@ class Lmass {
     public function setLicenseId($licenseId) {
         if(is_string($licenseId)) {
             $licenseId = strtolower(trim($licenseId));
-            if(strlen($licenseId) === LICENSE_LEN){
+            if(strlen($licenseId) == LICENSE_LEN){
+                if(!is_null($this->licenseId)) {
+                    $this->deleteLicenseData();
+                }
+                $this->licenseId = $licenseId;
                 file_put_contents($this->licenseFile, json_encode(array('licenseId' => $this->licenseId))) or die("Error: Can't save license in license file!");
             }
         }
+        return true;
+    }
+    
+    public function deleteLicense() {
+        file_put_contents($this->licenseFile, "");
+        $this->deleteLicenseData();
+        $this->licenseId = null;
+        $this->licenseData = null;
         return true;
     }
     
@@ -150,16 +163,32 @@ class Lmass {
                 if(!is_null($tmpObj) && (strlen($tmpObj->licenseId) == LICENSE_LEN)) {
                     $this->licenseId = $tmpObj->licenseId;
                 } else {
-                    die("Error: Wrong data in license file!");
+                    $this->statusMessage = "Error: Wrong data in license file!";
+                    return false;
                 }
             } else {
-                die("Error: Wrong data in license file!");
+                $this->statusMessage = "Error: Wrong data in license file!";
+                return false;
             }
             $this->statusMessage = "license is setted";
             return true;
         } else {
             $this->statusMessage = "license file doesn't exist";
             return false;
+        }
+    }
+    
+    public function resetData() {
+        if($this->isSetted()) {
+            $this->loadLicenseRemoteData();
+            $this->saveLicenseData();
+        }
+    }
+    
+    public function getDemoLicense() {
+        if(!$this->isSetted()) {
+            $this->licenseId = str_repeat("0", LICENSE_LEN); //token for demo license request
+            return $this->loadLicenseRemoteData();
         }
     }
     
@@ -173,9 +202,6 @@ class Lmass {
     }
     
     private function encrypt_decrypt($action, $string) {
-        //BEGIN DEBUG
-//        return $string;
-        //END DEBUG
         $output = false;
         $encrypt_method = "AES-256-CBC";
         $secret_key = 'This is secret key';                     //Change the string for production
@@ -223,12 +249,12 @@ class Lmass {
     }
     
     private function loadLicenseRemoteData() {
-        if($this->isSetted()) {
+        if(($this->licenseId == str_repeat("0", LICENSE_LEN)) || $this->isSetted()) {
             $this->statusMessage = "remote license data will be loaded";
             $lic = $this->licenseId;
-            $key = $this->getInstalationId();
+            $key = $this->getInstalationId($this->licenseId == str_repeat("0", LICENSE_LEN));
             $mod = $this->moduleId;
-            $url = $this->baseURL . "?lic=$lic" . "&key=$key";
+            $url = $this->baseURL . "?lic=$lic&mod=$mod&key=$key";
             $reponse = file_get_contents($url);
             $tmpObj = json_decode($reponse);
             if(!is_null($tmpObj) && 
@@ -238,12 +264,19 @@ class Lmass {
                 $this->statusMessage = $tmpObj->status_message;
                 if(isset($tmpObj->data) && property_exists($tmpObj->data, 'demo') && $tmpObj->data->demo) {
                     $key = $this->getInstalationId(true);
-                    $url = $this->baseURL . "?&mod=$mod" . "&key=$key";
+                    $url = $this->baseURL . "?lic=$lic&mod=$mod&key=$key";
                     $this->statusMessage = "remote license data will be loaded for demo license";
                     $tmpObj = json_decode(file_get_contents($url));
+                    if(!is_null($tmpObj) && 
+                        property_exists($tmpObj, 'status') && 
+                        property_exists($tmpObj, 'status_message') && 
+                        property_exists($tmpObj, 'data')) {
+                        $this->setLicenseId($tmpObj->data->licebseId);
+                    }
                 }
                 if(isset($tmpObj->data) && property_exists($tmpObj->data, 'licenseId')) {
                     $this->licenseID = $tmpObj->data->licenseId;
+                    $this->setLicenseId($tmpObj->data->licenseId);
                     $this->licenseData = $tmpObj->data;
                     $this->saveLicenseData();
                     $this->statusMessage = "license data loaded remote and saved local";
@@ -262,17 +295,42 @@ class Lmass {
         if(is_null($this->licenseData)) {
             return false;
         }
+        $tmpObj = null;
+        if(file_exists($this->localDataFile)) {
+            if(!is_writable($this->localDataFile)) {
+                die('Error: License file is not writable!');
+            }
+            $tmpObj=json_decode(file_get_contents($this->localDataFile));
+        }
+        if(!is_object($tmpObj)) {
+            $tmpObj = (object)[];
+        }
+        $tmpStr = $this->licenseId;
+        $tmpObj->$tmpStr = json_encode($this->encrypt_decrypt('encrypt', json_encode($this->licenseData)));
+        file_put_contents($this->localDataFile, json_encode($tmpObj)) or die("Error: Can't save license in license file!");
+        return true;
+    }
+    
+    private function deleteLicenseData() {
+        if(is_null($this->licenseId)) {
+            $this->statusMessage = "license isn't setted yet";
+            return false;
+        }
         if(file_exists($this->localDataFile)) {
             if(!is_writable($this->localDataFile)) {
                 die('Error: License file is not writable!');
             }
             $tmpObj=json_decode(file_get_contents($this->localDataFile));
         } else {
-            $tmpObj = new Object();
+            $tmpObj = (object)[];
         }
+        
         $tmpStr = $this->licenseId;
-        $tmpObj->$tmpStr = json_encode($this->encrypt_decrypt('encrypt', json_encode($this->licenseData)));
+        if(!is_null($tmpObj) && property_exists($tmpObj, $tmpStr)) {
+            unset($tmpObj->$tmpStr);
+        }
         file_put_contents($this->localDataFile, json_encode($tmpObj)) or die("Error: Can't save license in license file!");
+        $this->licenseData = null;
         return true;
     }
 }
