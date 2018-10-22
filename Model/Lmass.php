@@ -251,6 +251,7 @@ class Lmass {
                         property_exists($tmpObj, 'status') && 
                         property_exists($tmpObj, 'status_message') && 
                         property_exists($tmpObj, 'data')) {
+                        $this->statusMessage = $tmpObj->status_message;
                         $this->setLicenseId($tmpObj->data->licebseId);
                     }
                 }
